@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+
+from requests import session
+from sys import argv as av
+from bs4 import BeautifulSoup as bs
+from tqdm import tqdm
+from time import sleep
+
+
+
+#######################################################################################################################
+#
+# Settings
+#
+##
+
+APP = av[0].split('/')[-1]
+
+BASE_URL = 'https://pypi.org/search'
+HTTP_SLEEP = .4
+MAX_PAGES_RESULTS = 3
+
+HTTP_HEADERS = {
+'authority': 'pypi.org' ,
+'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9' ,
+'accept-language': 'en-GB;q=0.5' ,
+'referer': 'https://pypi.org/' ,
+'sec-fetch-dest': 'document' ,
+'sec-fetch-mode': 'navigate' ,
+'sec-fetch-site': 'same-origin' ,
+'sec-fetch-user': '?1' ,
+'sec-gpc': '1' ,
+'upgrade-insecure-requests': '1' ,
+'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.62 Safari/537.36' ,
+}
+
+HTML_NEXT_PAGE = 'class="button button-group__button">Next</a>'
+
+FOUNDS = []
+
+C_GRAY    = "\033[0;30m"
+C_RED     = "\033[1;31m"
+C_GREEN   = "\033[1;32m"
+C_YELLOW  = "\033[1;33m"
+C_BLUE    = "\033[1;34m"
+C_MAGENTA = "\033[1;35m"
+C_CYAN    = "\033[1;36m"
+C_RESET   = "\033[0m"
+
+
+
+#######################################################################################################################
+#
+# Funcz
+#
+##
+
+def usage(errcode=0):
+  print("\nUsage: %s <needle> [-f]" % APP)
+  print("\nString will be searched on PIP library")
+  print(f"\n -f : search every results. By default get from {MAX_PAGES_RESULTS}st pages.")
+  print("\nURL: https://pypi.org/")
+  exit(errcode)
+
+def clear_colors():
+  global C_RESET,C_GRAY,C_MAGENTA,C_BLUE,C_YELLOW,C_GREEN,C_RED
+  C_GRAY    = ""
+  C_RED     = ""
+  C_GREEN   = ""
+  C_YELLOW  = ""
+  C_BLUE    = ""
+  C_MAGENTA = ""
+  C_CYAN    = ""
+  C_RESET   = ""
+
+
+def color(c):
+  global C_RESET,C_GRAY,C_MAGENTA,C_BLUE,C_YELLOW,C_GREEN,C_RED
+  if c == 'gray':     print(C_GRAY,end="")
+  if c == 'red':      print(C_RED,end="")
+  if c == 'green':    print(C_GREEN,end="")
+  if c == 'yellow':   print(C_YELLOW,end="")
+  if c == 'blue':     print(C_BLUE,end="")
+  if c == 'magenta':  print(C_MAGENTA,end="")
+  if c == 'cyan':     print(C_CYAN,end="")
+  if c == 'reset':    print(C_RESET,end="")
+
+def error(txt,errcode=0):
+  global C_RESET,C_RED
+  print(f"\n{C_RED}Error: {txt}{C_RESET}")
+  if errcode:
+    exit(errcode)
+
+def http_pip_get(s,pkg,n_page=1): # s = session
+  global BASE_URL, HTTP_HEADERS, HTTP_SLEEP
+  sleep(HTTP_SLEEP)
+  try:
+    ans = s.get(f"{BASE_URL}/?q={pkg}&page={n_page}",headers=HTTP_HEADERS)
+  except:
+    error("Connection failed.",1)
+  return(ans)
+
+def get_max_pages(s,pkg): # s = session
+  global BASE_URL, HTML_NEXT_PAGE
+  max_pages = 1
+  ans = http_pip_get(s,pkg)
+  if HTML_NEXT_PAGE in ans.text:
+    try:
+      max_pages = ans.text.split(f'/search/?q={pkg}&amp;page=')[3].split('</a>')[0].split('"')[0]
+    except:
+      max_pages = ans.text.split(f'/search/?q={pkg}&amp;page=')[2].split('</a>')[0].split('"')[0]
+    max_pages = int(max_pages)
+  return(max_pages)
+
+def reformat_date(date): # b = BeautifulSoup object
+  month = date.split(' ')[0]               # reformat
+  day   = date.split(' ')[1].split(',')[0] # date to
+  if len(day) != 2:  # ................... # fill column
+    day = '0'+day    # ................... #
+  year  = date.split(' ')[2] # ........... #
+  date  = "%-3s %-2s, %s" % (month,day,year)
+  return(date)
+
+def get_results(html):
+  global FOUNDS
+  for li in html('li'):
+      b = bs(str(li),features="lxml")
+      if 'package-snippet__created' in str( b('a') ) :
+        item = {
+          'name':    b('a')[0]('span')[0].text.strip(),
+          'version': b('a')[0]('span')[1].text.strip(),
+          'descr':   b('a')[0]('p')[0].text.strip(),
+          'date':    reformat_date(b('a')[0]('span')[2].text.strip())
+        }
+        if item not in FOUNDS:
+          FOUNDS.append(item)
+
+def show_results(limit=0):
+  global FOUNDS, C_BLUE, C_RESET
+  P = C_GRAY+'|'+C_RESET # P = pipe
+  count = len(FOUNDS)
+  if not limit:
+    print("\rFound %s package(s)\n" % count)
+  else:
+    print("\rFound %s package(s) over +%s result(s)\n" % (count,20*(limit-1)))
+  index = 0
+  if count >= 1:
+    # print( "%-5s | %-45s | %15s | %-15s | %s" % ("Index","Name","Version","Date","Description"))
+    # print( "%-5s | %-45s | %15s | %-15s | %s" % ("-"*5,"-"*45,"-"*15,"-"*15,"-"*50))
+    print( f"%-35s {P} %-20s {P} %-12s {P} %s" % ("NAME","VERSION","DATE","DESCRIPTION"))
+    color("gray")
+    print( f"%-35s | %-20s | %-12s | %s" % ("-"*35,"-"*20,"-"*12,"-"*50))
+    color("reset")
+    for f in FOUNDS:
+      index += 1
+      # print( "%-5s | %-45s | %15s | %-15s |\033[0;34m %s \033[0m" % ( index,f['name'],f['version'],f['date'],f['descr'] ) )
+      print( f"%-35s {P} %-20s {P} %-12s {P} {C_BLUE} %s {C_RESET}" % ( f['name'],f['version'],f['date'],f['descr'] ) )
+
+def go_next_page(ans,n_page):
+  global HTML_NEXT_PAGE  
+  if HTML_NEXT_PAGE in ans.text:
+    n_page = n_page + 1
+    return(n_page)
+  else:
+    return(-1)
+
+
+
+#######################################################################################################################
+#
+# Args
+#
+##
+
+try:
+  needle = av[1]
+except Exception as e:
+  usage(0)
+
+search_all_pages=0
+no_color=0
+if 3 >= len(av) >= 2:
+  for arg in av[2:]:
+    if arg == '-f':
+      search_all_pages=1
+    elif arg == '-n':
+      no_color=1
+    else:
+      error("Bad option.")
+      usage(1)
+
+
+
+#######################################################################################################################
+#
+# Main
+#
+##
+
+s = session()
+
+if no_color==1:
+  clear_colors()
+
+print(f"\nSearching for '{C_MAGENTA}%s{C_RESET}' ..." % needle,end="")
+
+max_pages = get_max_pages(s,needle)
+range_pages = MAX_PAGES_RESULTS
+if search_all_pages:
+  range_pages = max_pages
+  
+
+if range_pages >= 1:
+  print(f"\b\b\b\b in {C_GREEN}%s{C_RESET} pages" % range_pages,end="")
+
+  iterator = range(0,range_pages+1)
+  if range_pages > 10:
+    color("blue")
+    print("[ CTRL+C to abort search and display results ]")
+    iterator = tqdm(range(0,range_pages+1))
+
+  for n_page in iterator:
+    try:
+      ans = http_pip_get(s,needle,n_page)
+      html = bs(ans.text,features="lxml")
+      get_results(html)
+      next_page = go_next_page(ans,n_page)
+      if next_page < 0: # -1 = end
+        break
+    except KeyboardInterrupt:
+      break
+    except:
+      error("Something wrong happened.",1)
+
+  color("reset")
+
+if range_pages != max_pages:
+  show_results(max_pages)
+else:
+  show_results()
+
+print(f'{C_MAGENTA}-> URL: ' + BASE_URL + f'?q={needle}{C_RESET}')
+
+
